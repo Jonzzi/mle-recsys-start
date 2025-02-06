@@ -27,8 +27,11 @@ class SimilarItems:
         Возвращает список похожих объектов
         """
         try:
-            i2i = self._similar_items.loc[item_id].head(k)
-            i2i = i2i[["item_id_2", "score"]].to_frame().to_dict(orient="records") #list
+            #i2i = self._similar_items.loc[item_id].head(k)
+            i2i = self._similar_items.loc[self._similar_items['item_id_1'] == item_id, :].head(k)
+            #i2i = i2i[["item_id_2", "score"]].to_frame().to_dict(orient="records") #list
+            i2i = i2i[["item_id_2", "score"]].to_dict(orient="list")
+
         except KeyError:
             logger.error("No recommendations found")
             i2i = {"item_id_2": [], "score": {}}
