@@ -2,6 +2,7 @@ import logging
 import pandas as pd
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
+import requests
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -87,6 +88,103 @@ async def recommendations(user_id: int, k: int = 100):
     """
 
     recs = rec_store.get(user_id, k)
+
+    return {"recs": recs}
+
+_ = '''
+@app.post("/recommendations_online")
+async def recommendations_online(user_id: int, k: int = 100):
+    """
+    Возвращает список онлайн-рекомендаций длиной k для пользователя user_id
+    """
+
+    headers = {"Content-type": "application/json", "Accept": "text/plain"}
+
+    features_store_url = "http://127.0.0.1:8010"
+    events_store_url = "http://127.0.0.1:8020"
+
+    # получаем последнее событие пользователя
+    params = {"user_id": user_id, "k": 1}
+    resp = requests.post(events_store_url + "/get", headers=headers, params=params)
+    events = resp.json()
+    events = events["events"]
+
+    # получаем список похожих объектов
+    if len(events) > 0:
+        item_id = events[0]
+        params = {"item_id": item_id, "k": k}
+        # ваш код здесь
+        headers = {'Content-type': 'application/json', 'Accept': 'text/plain'}
+        resp = requests.post(features_store_url +"/similar_items", headers=headers, params=params)
+        if resp.status_code == 200:
+            item_similar_items = resp.json()
+            #print(type(item_similar_items))
+            #print(item_similar_items)
+            item_similar_items = item_similar_items['item_id_2']
+        else:
+            item_similar_items = None
+            print(f"status code: {resp.status_code}")
+
+        recs = item_similar_items[:k]
+    else:
+        recs = []
+
+    return {"recs": recs}    
+'''
+    
+def dedup_ids(ids):
+    """
+    Дедублицирует список идентификаторов, оставляя только первое вхождение
+    """
+    seen = set()
+    ids = [id for id in ids if not (id in seen or seen.add(id))]
+
+    return ids
+
+@app.post("/recommendations_online")
+async def recommendations_online(user_id: int, k: int = 100):
+    """
+    Возвращает список онлайн-рекомендаций длиной k для пользователя user_id
+    """
+    features_store_url = "http://127.0.0.1:8010"
+    events_store_url = "http://127.0.0.1:8020"
+
+    headers = {"Content-type": "application/json", "Accept": "text/plain"}
+
+    # получаем список последних событий пользователя, возьмём три последних
+    params = {"user_id": user_id, "k": 3}
+    # ваш код здесь
+    resp = requests.post(events_store_url + "/get", 
+                        headers=headers, 
+                        params=params)
+
+    if resp.status_code == 200:
+        events = resp.json()['events']
+
+    # получаем список айтемов, похожих на последние три, с которыми взаимодействовал пользователь
+    items = []
+    scores = []
+    for item_id in events:
+        # для каждого item_id получаем список похожих в item_similar_items
+        # ваш код здесь
+        params = {"item_id": item_id, "k": 3}
+        resp = requests.post(features_store_url +"/similar_items", headers=headers, params=params)
+        if resp.status_code == 200:
+            item_similar_items = resp.json()
+        else:
+            item_similar_items = None
+            print(f"status code: {resp.status_code}")
+
+        items += item_similar_items["item_id_2"]
+        scores += item_similar_items["score"]
+    # сортируем похожие объекты по scores в убывающем порядке
+    # для старта это приемлемый подход
+    combined = list(zip(items, scores))
+    combined = sorted(combined, key=lambda x: x[1], reverse=True)
+    combined = [item for item, _ in combined]
+
+    # удаляем дубликаты, чтобы не выдавать одинаковые рекомендации
+    recs = dedup_ids(combined)[:k]
 
     return {"recs": recs}
     
